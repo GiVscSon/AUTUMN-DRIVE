@@ -11,9 +11,12 @@ let dpr = 1;
 
 const car = {
   lateral: 0,
+  lateralVelocity: 0,
   speed: 0,
   heading: 0,
   targetHeading: 0,
+  steerVisual: 0,
+  slip: 0,
 };
 
 const world = {
@@ -139,35 +142,56 @@ function update(dt) {
   const brake = Math.max(keyboardBrake, touchInput.brake);
   const steer = keyboardSteer || touchInput.steer;
 
-  car.speed += throttle * 42 * dt;
-  car.speed -= brake * 70 * dt;
-  car.speed -= (0.55 + car.speed * 0.006) * dt;
-  car.speed = Math.max(0, Math.min(145, car.speed));
+  // Progressive engine force: lively at low speed, softer near top speed.
+  const speedRatio = car.speed / 150;
+  const engineForce = 54 * Math.max(0.2, 1 - speedRatio * 0.72);
+  car.speed += throttle * engineForce * dt;
+  car.speed -= brake * (82 + car.speed * 0.08) * dt;
 
-  const steering = (0.00024 + car.speed * 0.000005) * 60 * dt;
-  car.targetHeading += steer * steering;
-  car.targetHeading = Math.max(-0.8, Math.min(0.8, car.targetHeading));
-  car.heading += (car.targetHeading - car.heading) * Math.min(1, dt * 5.5);
+  // Rolling resistance + aero drag. Coasting now feels gradual instead of sticky.
+  car.speed -= (0.7 + car.speed * 0.012 + car.speed * car.speed * 0.00011) * dt;
+  car.speed = Math.max(0, Math.min(150, car.speed));
 
-  // advance along road and update curvature
+  const speedGrip = Math.min(1, car.speed / 32);
+  const highSpeedCalm = 1 - Math.min(0.52, car.speed / 290);
+  const maxHeading = 0.48 * highSpeedCalm;
+  const steerRate = (1.5 + car.speed * 0.004) * speedGrip;
+
+  car.targetHeading += steer * steerRate * dt;
+  if (!steer) {
+    // Self-centering steering prevents the car from continuing to turn after release.
+    car.targetHeading *= Math.max(0, 1 - dt * (2.2 + car.speed * 0.006));
+  }
+  car.targetHeading = Math.max(-maxHeading, Math.min(maxHeading, car.targetHeading));
+  car.heading += (car.targetHeading - car.heading) * Math.min(1, dt * (5.2 + speedGrip * 2.5));
+  car.steerVisual += (steer - car.steerVisual) * Math.min(1, dt * 9);
+
   world.distance += car.speed * dt * 0.026;
   const sample = roadSample(world.distance);
-  world.curve += (sample.curve - world.curve) * Math.min(1, dt * 3.5);
+  world.curve += (sample.curve - world.curve) * Math.min(1, dt * 3.2);
 
-  // lateral position is now a consequence of heading and road curvature,
-  // not the steering input directly
-  const lateralFromHeading = car.heading * car.speed * 0.0014;
-  const centrifugal = world.curve * car.speed * 0.0008;
-  car.lateral += (lateralFromHeading + centrifugal) * dt;
-  const friction = 0.4 + car.speed * 0.0012;
-  car.lateral -= car.lateral * friction * dt;
-  car.lateral = Math.max(-0.86, Math.min(0.86, car.lateral));
+  // Simple bicycle-style lateral physics. Heading creates lateral velocity first,
+  // then tyre grip damps it. This removes the old sideways "teleport" feeling.
+  const desiredLateralVelocity = car.heading * car.speed * 0.0105;
+  const curvePull = world.curve * car.speed * car.speed * 0.000018;
+  const wetGrip = 4.8 - Math.min(1.45, car.speed / 105);
+  car.lateralVelocity += (desiredLateralVelocity + curvePull - car.lateralVelocity) * Math.min(1, dt * wetGrip);
+  car.lateral += car.lateralVelocity * dt;
 
-  // traffic movement and basic car-following behaviour
+  // Soft shoulder resistance and speed loss when leaving the useful road width.
+  const shoulder = Math.max(0, Math.abs(car.lateral) - 0.72);
+  if (shoulder > 0) {
+    car.speed = Math.max(0, car.speed - shoulder * 52 * dt);
+    car.lateralVelocity *= Math.max(0, 1 - dt * 3.5);
+  }
+  car.lateral = Math.max(-0.9, Math.min(0.9, car.lateral));
+
+  // A small readable wet-road slip value for body lean/camera feel.
+  car.slip += ((car.lateralVelocity * 0.55 - car.heading * 0.18) - car.slip) * Math.min(1, dt * 5);
+
   for (const other of world.traffic) {
     if (other.baseSpeed == null) other.baseSpeed = other.speed;
 
-    // simple car-following: look for nearest car ahead in same lane
     let nearestAhead = null;
     let nearestGap = Infinity;
     for (const candidate of world.traffic) {
@@ -180,13 +204,11 @@ function update(dt) {
       }
     }
 
-    if (nearestAhead && nearestGap < 0.06) {
-      // too close to car ahead: smoothly reduce speed toward 60–80% of base
-      const brakeFactor = (0.06 - nearestGap) * 240;
-      const target = Math.max(other.baseSpeed * 0.6, other.baseSpeed - brakeFactor);
-      other.speed += (target - other.speed) * Math.min(1, dt * 3.5);
+    if (nearestAhead && nearestGap < 0.075) {
+      const urgency = Math.max(0, (0.075 - nearestGap) / 0.075);
+      const target = Math.min(other.baseSpeed, nearestAhead.speed - urgency * 10);
+      other.speed += (Math.max(20, target) - other.speed) * Math.min(1, dt * 4.5);
     } else {
-      // restore toward base speed when road ahead is clear
       other.speed += (other.baseSpeed - other.speed) * Math.min(1, dt * 0.8);
     }
 
@@ -202,10 +224,10 @@ function update(dt) {
     routeForTraffic(other, dt);
   }
 
-  // interaction between player and traffic: basic "don't ram parked car" logic
   for (const other of world.traffic) {
     if (Math.abs(other.z - 0.82) < 0.075 && Math.abs(other.lane - car.lateral * 0.62) < 0.22) {
-      car.speed = Math.min(car.speed, Math.max(12, other.speed * 0.82));
+      car.speed = Math.min(car.speed, Math.max(10, other.speed * 0.78));
+      car.lateralVelocity *= 0.72;
     }
   }
 }
@@ -430,7 +452,7 @@ function drawTraffic() {
 function drawCar() {
   const cx = width / 2 + car.lateral * width * 0.18;
   const cy = height * 0.79;
-  const lean = car.heading * 0.12;
+  const lean = car.heading * 0.09 + car.slip * 0.045;
 
   ctx.save();
   ctx.translate(cx, cy);
@@ -545,15 +567,27 @@ function attachMobileControls() {
     setter(0);
   };
 
-  btnLeft.addEventListener("touchstart", start((v) => (touchInput.steer = v), -1));
-  btnLeft.addEventListener("touchend", stop((v) => (touchInput.steer = v)));
-  btnRight.addEventListener("touchstart", start((v) => (touchInput.steer = v), 1));
-  btnRight.addEventListener("touchend", stop((v) => (touchInput.steer = v)));
+  const bindHold = (button, setter, value) => {
+    button.addEventListener("pointerdown", (e) => {
+      e.preventDefault();
+      button.setPointerCapture?.(e.pointerId);
+      setter(value);
+      button.classList.add("active");
+    });
+    const release = (e) => {
+      e.preventDefault();
+      setter(0);
+      button.classList.remove("active");
+    };
+    button.addEventListener("pointerup", release);
+    button.addEventListener("pointercancel", release);
+    button.addEventListener("lostpointercapture", release);
+  };
 
-  btnThrottle.addEventListener("touchstart", start((v) => (touchInput.throttle = v), 1));
-  btnThrottle.addEventListener("touchend", stop((v) => (touchInput.throttle = v)));
-  btnBrake.addEventListener("touchstart", start((v) => (touchInput.brake = v), 1));
-  btnBrake.addEventListener("touchend", stop((v) => (touchInput.brake = v)));
+  bindHold(btnLeft, (v) => (touchInput.steer = v), -1);
+  bindHold(btnRight, (v) => (touchInput.steer = v), 1);
+  bindHold(btnThrottle, (v) => (touchInput.throttle = v), 1);
+  bindHold(btnBrake, (v) => (touchInput.brake = v), 1);
 }
 
 attachMobileControls();
