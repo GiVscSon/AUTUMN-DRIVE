@@ -18,11 +18,29 @@ const car = {
 
 const world = {
   distance: 0,
+  road: {
+    segmentLength: 1,
+    laneWidth: 1,
+    segments: [
+      { length: 2.4, curve: 0.00, width: 1.00 },
+      { length: 1.8, curve: 0.16, width: 1.00 },
+      { length: 2.1, curve: 0.28, width: 1.00 },
+      { length: 1.6, curve: -0.12, width: 1.00 },
+      { length: 2.0, curve: -0.30, width: 1.00 },
+      { length: 2.4, curve: 0.00, width: 1.00 },
+      { length: 1.5, curve: 0.00, width: 0.78, intersection: true },
+      { length: 1.7, curve: 0.00, width: 1.00 },
+      { length: 2.0, curve: -0.22, width: 1.00 },
+      { length: 2.2, curve: 0.20, width: 1.00 },
+    ],
+  },
+  roadCenter: 0,
   curve: 0,
   traffic: [
-    { z: 0.34, lane: -0.34, speed: 62, color: "#596267" },
-    { z: 0.62, lane: 0.38, speed: 48, color: "#7c4630" },
-    { z: 0.82, lane: -0.18, speed: 76, color: "#a08a57" },
+    { z: 0.34, lane: -0.34, routeLane: -0.34, speed: 62, color: "#596267" },
+    { z: 0.62, lane: 0.38, routeLane: 0.38, speed: 48, color: "#7c4630" },
+    { z: 0.82, lane: -0.18, routeLane: -0.18, speed: 76, color: "#a08a57" },
+    { z: 0.48, lane: 0.34, routeLane: 0.34, speed: 57, color: "#4f5d60" },
   ],
   roadside: [
     { z: 0.22, side: -1, type: "sign" },
@@ -57,6 +75,29 @@ function pressed(...names) {
   return names.some((name) => keys.has(name));
 }
 
+function roadSample(distance) {
+  const loopLength = world.road.segments.reduce((sum, segment) => sum + segment.length, 0);
+  let d = ((distance % loopLength) + loopLength) % loopLength;
+  let offset = 0;
+  let curve = 0;
+  let widthScale = 1;
+  let intersection = false;
+
+  for (const segment of world.road.segments) {
+    if (d <= offset + segment.length) {
+      const local = (d - offset) / segment.length;
+      const smooth = local * local * (3 - 2 * local);
+      curve = segment.curve * smooth;
+      widthScale = segment.width;
+      intersection = Boolean(segment.intersection);
+      break;
+    }
+    offset += segment.length;
+  }
+
+  return { curve, widthScale, intersection, loopLength };
+}
+
 function update(dt) {
   const throttle = pressed("w", "arrowup") ? 1 : 0;
   const brake = pressed("s", "arrowdown") ? 1 : 0;
@@ -72,38 +113,44 @@ function update(dt) {
   car.targetHeading = Math.max(-0.8, Math.min(0.8, car.targetHeading));
   car.heading += (car.targetHeading - car.heading) * Math.min(1, dt * 5.5);
 
-  car.lateral += steer * (0.22 + car.speed / 210) * dt;
+  const lateralVelocity = steer * (0.22 + car.speed / 210);
+  car.lateral += lateralVelocity * dt;
   car.lateral *= Math.pow(0.985, dt * 60);
   car.lateral = Math.max(-0.86, Math.min(0.86, car.lateral));
 
   world.distance += car.speed * dt * 0.026;
+  const sample = roadSample(world.distance);
+  world.curve += (sample.curve - world.curve) * Math.min(1, dt * 3.5);
 
   for (const other of world.traffic) {
     other.z += (car.speed - other.speed) * dt * 0.00075;
-    if (other.z < 0.08) other.z = 0.98;
+    if (other.z < 0.08) {
+      other.z = 0.98;
+      other.lane = other.routeLane;
+    }
     if (other.z > 1.02) other.z = 0.12;
+
+    // NPCs gently return to their assigned lane instead of drifting sideways.
+    other.lane += (other.routeLane - other.lane) * Math.min(1, dt * 2.5);
   }
 
-  // Simple forward collision envelope. Slow down before overlapping another car.
+  // Simple forward collision envelope.
   for (const other of world.traffic) {
     if (Math.abs(other.z - 0.82) < 0.075 && Math.abs(other.lane - car.lateral * 0.62) < 0.22) {
       car.speed = Math.min(car.speed, Math.max(12, other.speed * 0.82));
     }
   }
-  world.curve =
-    Math.sin(world.distance * 0.52) * 0.22 +
-    Math.sin(world.distance * 0.19 + 1.4) * 0.13;
 }
 
 function project(depth, lane = 0) {
-  // depth: 0 horizon, 1 foreground
   const horizon = height * 0.40;
   const p = Math.pow(depth, 1.65);
   const y = horizon + p * (height - horizon);
   const roadHalf = width * (0.045 + p * 0.49);
   const bend = world.curve * p * p * width * 0.36;
   const center = width / 2 + bend;
-  return { x: center + lane * roadHalf, y, roadHalf, center, p };
+  const laneOffset = lane * roadHalf * world.road.laneWidth;
+  return { x: center + laneOffset, y, roadHalf, center, p };
 }
 
 function drawSky() {
@@ -190,7 +237,7 @@ function drawRoad() {
     ctx.stroke();
   }
 
-  // Broken centre marking. This is one of the main visual depth cues.
+  // Broken centre marking plus subtle lane guides.
   for (let i = 2; i < 25; i++) {
     const d = i / 25;
     const p = project(d, 0);
@@ -201,6 +248,20 @@ function drawRoad() {
     ctx.beginPath();
     ctx.moveTo(p.x, p.y);
     ctx.lineTo(p2.x, p2.y);
+    ctx.stroke();
+  }
+
+  // At the intersection the road opens slightly, creating a readable junction cue.
+  const junction = roadSample(world.distance);
+  if (junction.intersection) {
+    const p = project(0.48, 0);
+    ctx.fillStyle = "rgba(190,184,160,.12)";
+    ctx.fillRect(p.x - p.roadHalf * 1.35, p.y - 8, p.roadHalf * 2.7, 16);
+    ctx.strokeStyle = "rgba(220,214,190,.5)";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(p.x - p.roadHalf * 0.85, p.y - 5);
+    ctx.lineTo(p.x + p.roadHalf * 0.85, p.y - 5);
     ctx.stroke();
   }
 
@@ -251,7 +312,7 @@ function drawForest() {
 
 function drawRoadsideObjects() {
   for (const obj of world.roadside) {
-    const p = project(obj.z, obj.side * 1.12);
+    const p = project(obj.z, obj.side * (1.12 + (roadSample(world.distance + obj.z * 2).intersection ? 0.18 : 0)));
     const s = 7 + p.p * Math.min(width, height) * 0.055;
 
     ctx.globalAlpha = 0.45 + p.p * 0.5;
