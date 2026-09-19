@@ -397,7 +397,8 @@ function drawTraffic() {
     ctx.restore();
   }
 }
-\nfunction drawCar() {
+
+function drawCar() {
   const cx = width / 2 + car.lateral * width * 0.18;
   const cy = height * 0.79;
   const lean = car.heading * 0.12;
