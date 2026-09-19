@@ -152,7 +152,33 @@ function update(dt) {
   car.lateral -= car.lateral * friction * dt;
   car.lateral = Math.max(-0.86, Math.min(0.86, car.lateral));
 
+  // traffic movement and basic car-following behaviour
   for (const other of world.traffic) {
+    if (other.baseSpeed == null) other.baseSpeed = other.speed;
+
+    // simple car-following: look for nearest car ahead in same lane
+    let nearestAhead = null;
+    let nearestGap = Infinity;
+    for (const candidate of world.traffic) {
+      if (candidate === other) continue;
+      const sameLane = Math.abs(candidate.lane - other.lane) < 0.12;
+      const gap = candidate.z - other.z;
+      if (sameLane && gap > 0 && gap < nearestGap) {
+        nearestGap = gap;
+        nearestAhead = candidate;
+      }
+    }
+
+    if (nearestAhead && nearestGap < 0.06) {
+      // too close to car ahead: smoothly reduce speed toward 60–80% of base
+      const brakeFactor = (0.06 - nearestGap) * 240;
+      const target = Math.max(other.baseSpeed * 0.6, other.baseSpeed - brakeFactor);
+      other.speed += (target - other.speed) * Math.min(1, dt * 3.5);
+    } else {
+      // restore toward base speed when road ahead is clear
+      other.speed += (other.baseSpeed - other.speed) * Math.min(1, dt * 0.8);
+    }
+
     other.z += (car.speed - other.speed) * dt * 0.00075;
     if (other.z < 0.08) {
       other.z = 0.98;
@@ -165,6 +191,7 @@ function update(dt) {
     routeForTraffic(other, dt);
   }
 
+  // interaction between player and traffic: basic "don't ram parked car" logic
   for (const other of world.traffic) {
     if (Math.abs(other.z - 0.82) < 0.075 && Math.abs(other.lane - car.lateral * 0.62) < 0.22) {
       car.speed = Math.min(car.speed, Math.max(12, other.speed * 0.82));
