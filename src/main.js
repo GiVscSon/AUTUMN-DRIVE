@@ -123,10 +123,21 @@ function routeForTraffic(other, dt) {
   other.lane += (other.routeTargetLane - other.lane) * Math.min(1, dt * 1.8);
 }
 
+const touchInput = {
+  throttle: 0,
+  brake: 0,
+  steer: 0,
+};
+
 function update(dt) {
-  const throttle = pressed("w", "arrowup") ? 1 : 0;
-  const brake = pressed("s", "arrowdown") ? 1 : 0;
-  const steer = (pressed("d", "arrowright") ? 1 : 0) - (pressed("a", "arrowleft") ? 1 : 0);
+  const keyboardThrottle = pressed("w", "arrowup") ? 1 : 0;
+  const keyboardBrake = pressed("s", "arrowdown") ? 1 : 0;
+  const keyboardSteer =
+    (pressed("d", "arrowright") ? 1 : 0) - (pressed("a", "arrowleft") ? 1 : 0);
+
+  const throttle = Math.max(keyboardThrottle, touchInput.throttle);
+  const brake = Math.max(keyboardBrake, touchInput.brake);
+  const steer = keyboardSteer || touchInput.steer;
 
   car.speed += throttle * 42 * dt;
   car.speed -= brake * 70 * dt;
@@ -465,55 +476,47 @@ function drawCar() {
   ctx.save();
   ctx.translate(0, -23 + bob);
 
+  // сиденье
+  ctx.fillStyle = "#1a1f22";
+  ctx.fillRect(-12, 0, 24, 16);
+
+  // спинка кресла, слегка наклонена вперёд (в сторону дороги)
+  ctx.save();
+  ctx.translate(0, -10);
+  ctx.rotate(-0.15);
+  ctx.fillStyle = "#22272a";
+  ctx.fillRect(-10, -16, 20, 18);
+  ctx.restore();
+
+  // голова, немного сзади, смотрит к горизонту
   ctx.fillStyle = "#171b1d";
   ctx.beginPath();
-  ctx.ellipse(0, 8, 13, 18, 0, 0, Math.PI * 2);
-  ctx.fill();
-
-  ctx.fillStyle = "#e5e2d8";
-  ctx.beginPath();
-  ctx.ellipse(0, 10, 8, 12, 0, 0, Math.PI * 2);
-  ctx.fill();
-
-  ctx.fillStyle = "#171b1d";
-  ctx.beginPath();
-  ctx.arc(0, -10, 11, 0, Math.PI * 2);
+  ctx.arc(0, -22, 7, 0, Math.PI * 2);
   ctx.fill();
 
   ctx.fillStyle = "#eee9dc";
   ctx.beginPath();
-  ctx.ellipse(0, -8, 7, 6, 0, 0, Math.PI * 2);
+  ctx.ellipse(0, -21, 4, 3, 0, 0, Math.PI * 2);
   ctx.fill();
 
-  ctx.fillStyle = "#d98b35";
-  ctx.beginPath();
-  ctx.moveTo(0, -5);
-  ctx.lineTo(8, -2);
-  ctx.lineTo(0, 1);
-  ctx.closePath();
-  ctx.fill();
-
-  ctx.fillStyle = "#111";
-  ctx.beginPath();
-  ctx.arc(-3.3, -10, 1.2, 0, Math.PI * 2);
-  ctx.arc(3.3, -10, 1.2, 0, Math.PI * 2);
-  ctx.fill();
-
+  // руль перед персонажем
   ctx.strokeStyle = "#171b1d";
-  ctx.lineWidth = 5;
+  ctx.lineWidth = 4;
+  ctx.beginPath();
+  ctx.arc(0, -6, 7, Math.PI * 0.2, Math.PI * 1.8);
+  ctx.stroke();
+
+  // руки в профиль, тянутся к рулю, учитывая heading
+  ctx.strokeStyle = "#171b1d";
+  ctx.lineWidth = 3;
   ctx.lineCap = "round";
   ctx.beginPath();
-  ctx.moveTo(-9, 3);
-  ctx.lineTo(-18, 0 - car.heading * 4);
-  ctx.moveTo(9, 3);
-  ctx.lineTo(18, 0 + car.heading * 4);
+  ctx.moveTo(-4, -12);
+  ctx.lineTo(-10, -8 - car.heading * 3);
+  ctx.moveTo(4, -12);
+  ctx.lineTo(10, -8 + car.heading * 3);
   ctx.stroke();
 
-  ctx.strokeStyle = "#b8b2a4";
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  ctx.arc(0, 4, 8, 0, Math.PI * 2);
-  ctx.stroke();
   ctx.restore();
 
   ctx.fillStyle = "#d6a34d";
@@ -525,6 +528,35 @@ function drawCar() {
 
   ctx.restore();
 }
+
+function attachMobileControls() {
+  const btnLeft = document.getElementById("btn-left");
+  const btnRight = document.getElementById("btn-right");
+  const btnThrottle = document.getElementById("btn-throttle");
+  const btnBrake = document.getElementById("btn-brake");
+  if (!btnLeft || !btnRight || !btnThrottle || !btnBrake) return;
+
+  const start = (setter, value) => (e) => {
+    e.preventDefault();
+    setter(value);
+  };
+  const stop = (setter) => (e) => {
+    e.preventDefault();
+    setter(0);
+  };
+
+  btnLeft.addEventListener("touchstart", start((v) => (touchInput.steer = v), -1));
+  btnLeft.addEventListener("touchend", stop((v) => (touchInput.steer = v)));
+  btnRight.addEventListener("touchstart", start((v) => (touchInput.steer = v), 1));
+  btnRight.addEventListener("touchend", stop((v) => (touchInput.steer = v)));
+
+  btnThrottle.addEventListener("touchstart", start((v) => (touchInput.throttle = v), 1));
+  btnThrottle.addEventListener("touchend", stop((v) => (touchInput.throttle = v)));
+  btnBrake.addEventListener("touchstart", start((v) => (touchInput.brake = v), 1));
+  btnBrake.addEventListener("touchend", stop((v) => (touchInput.brake = v)));
+}
+
+attachMobileControls();
 
 function drawMotion() {
   const amount = Math.min(0.12, car.speed / 1100);
