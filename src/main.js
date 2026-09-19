@@ -28,7 +28,7 @@ const world = {
       { length: 1.6, curve: -0.12, width: 1.00 },
       { length: 2.0, curve: -0.30, width: 1.00 },
       { length: 2.4, curve: 0.00, width: 1.00 },
-      { length: 1.5, curve: 0.00, width: 0.78, intersection: true },
+      { length: 1.5, curve: 0.00, width: 1.15, intersection: true },
       { length: 1.7, curve: 0.00, width: 1.00 },
       { length: 2.0, curve: -0.22, width: 1.00 },
       { length: 2.2, curve: 0.20, width: 1.00 },
@@ -82,23 +82,51 @@ function roadSample(distance) {
   let curve = 0;
   let widthScale = 1;
   let intersection = false;
+  let segmentIndex = 0;
 
-  for (const segment of world.road.segments) {
+  for (let i = 0; i < world.road.segments.length; i++) {
+    const segment = world.road.segments[i];
     if (d <= offset + segment.length) {
       const local = (d - offset) / segment.length;
       const smooth = local * local * (3 - 2 * local);
       curve = segment.curve * smooth;
       widthScale = segment.width;
       intersection = Boolean(segment.intersection);
+      segmentIndex = i;
       break;
     }
     offset += segment.length;
   }
 
-  return { curve, widthScale, intersection, loopLength };
+  return { curve, widthScale, intersection, segmentIndex, loopLength };
+}
+
+function routeForTraffic(other, dt) {
+  // NPC route state: straight through the junction by default,
+  // with a small subset choosing a turn when they enter the junction.
+  if (!other.routeState) {
+    other.routeState = "straight";
+    other.routeTargetLane = other.routeLane;
+  }
+
+  const sample = roadSample(world.distance + (0.82 - other.z) * 8);
+  if (sample.intersection && !other.routeChosen) {
+    other.routeChosen = true;
+    if (Math.abs(other.routeLane) > 0.2 && Math.random() < 0.32) {
+      other.routeState = other.routeLane < 0 ? "left" : "right";
+      other.routeTargetLane = other.routeLane < 0 ? -0.62 : 0.62;
+    }
+  }
+
+  if (!sample.intersection) {
+    other.routeChosen = false;
+  }
+
+  other.lane += (other.routeTargetLane - other.lane) * Math.min(1, dt * 1.8);
 }
 
 function update(dt) {
+
   const throttle = pressed("w", "arrowup") ? 1 : 0;
   const brake = pressed("s", "arrowdown") ? 1 : 0;
   const steer = (pressed("d", "arrowright") ? 1 : 0) - (pressed("a", "arrowleft") ? 1 : 0);
@@ -127,11 +155,12 @@ function update(dt) {
     if (other.z < 0.08) {
       other.z = 0.98;
       other.lane = other.routeLane;
+      other.routeTargetLane = other.routeLane;
+      other.routeChosen = false;
     }
     if (other.z > 1.02) other.z = 0.12;
 
-    // NPCs gently return to their assigned lane instead of drifting sideways.
-    other.lane += (other.routeLane - other.lane) * Math.min(1, dt * 2.5);
+    routeForTraffic(other, dt);
   }
 
   // Simple forward collision envelope.
