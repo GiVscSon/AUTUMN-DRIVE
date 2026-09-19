@@ -19,6 +19,17 @@ const car = {
 const world = {
   distance: 0,
   curve: 0,
+  traffic: [
+    { z: 0.34, lane: -0.34, speed: 62, color: "#596267" },
+    { z: 0.62, lane: 0.38, speed: 48, color: "#7c4630" },
+    { z: 0.82, lane: -0.18, speed: 76, color: "#a08a57" },
+  ],
+  roadside: [
+    { z: 0.22, side: -1, type: "sign" },
+    { z: 0.44, side: 1, type: "sign" },
+    { z: 0.69, side: -1, type: "barrier" },
+    { z: 0.88, side: 1, type: "barrier" },
+  ],
 };
 
 window.addEventListener("keydown", (e) => {
@@ -66,6 +77,19 @@ function update(dt) {
   car.lateral = Math.max(-0.86, Math.min(0.86, car.lateral));
 
   world.distance += car.speed * dt * 0.026;
+
+  for (const other of world.traffic) {
+    other.z += (car.speed - other.speed) * dt * 0.00075;
+    if (other.z < 0.08) other.z = 0.98;
+    if (other.z > 1.02) other.z = 0.12;
+  }
+
+  // Simple forward collision envelope. Slow down before overlapping another car.
+  for (const other of world.traffic) {
+    if (Math.abs(other.z - 0.82) < 0.075 && Math.abs(other.lane - car.lateral * 0.62) < 0.22) {
+      car.speed = Math.min(car.speed, Math.max(12, other.speed * 0.82));
+    }
+  }
   world.curve =
     Math.sin(world.distance * 0.52) * 0.22 +
     Math.sin(world.distance * 0.19 + 1.4) * 0.13;
@@ -223,7 +247,67 @@ function drawForest() {
   }
 }
 
-function drawCar() {
+
+
+function drawRoadsideObjects() {
+  for (const obj of world.roadside) {
+    const p = project(obj.z, obj.side * 1.12);
+    const s = 7 + p.p * Math.min(width, height) * 0.055;
+
+    ctx.globalAlpha = 0.45 + p.p * 0.5;
+    if (obj.type === "sign") {
+      ctx.strokeStyle = "#3b3d39";
+      ctx.lineWidth = Math.max(1, s * 0.11);
+      ctx.beginPath();
+      ctx.moveTo(p.x, p.y);
+      ctx.lineTo(p.x, p.y - s * 2.4);
+      ctx.stroke();
+
+      ctx.fillStyle = "#d4c8a7";
+      ctx.fillRect(p.x - s * 0.62, p.y - s * 2.65, s * 1.24, s * 0.72);
+      ctx.fillStyle = "#6e4b31";
+      ctx.fillRect(p.x - s * 0.42, p.y - s * 2.45, s * 0.84, s * 0.1);
+    } else {
+      ctx.strokeStyle = "#b96531";
+      ctx.lineWidth = Math.max(2, s * 0.24);
+      ctx.beginPath();
+      ctx.moveTo(p.x - s * 0.8, p.y - s * 0.25);
+      ctx.lineTo(p.x + s * 0.8, p.y - s * 0.25);
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+  }
+}
+
+function drawTraffic() {
+  for (const other of world.traffic) {
+    const p = project(other.z, other.lane);
+    const s = 10 + p.p * Math.min(width, height) * 0.075;
+
+    ctx.save();
+    ctx.translate(p.x, p.y - s * 0.28);
+    ctx.globalAlpha = 0.35 + p.p * 0.65;
+
+    ctx.fillStyle = "rgba(0,0,0,.35)";
+    ctx.beginPath();
+    ctx.ellipse(0, s * 0.38, s * 0.72, s * 0.22, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = other.color;
+    ctx.beginPath();
+    ctx.roundRect(-s * 0.62, -s * 0.32, s * 1.24, s * 0.62, s * 0.12);
+    ctx.fill();
+
+    ctx.fillStyle = "#202527";
+    ctx.fillRect(-s * 0.4, -s * 0.58, s * 0.8, s * 0.3);
+
+    ctx.fillStyle = "#d9a14c";
+    ctx.fillRect(-s * 0.48, s * 0.16, s * 0.18, s * 0.08);
+    ctx.fillRect(s * 0.30, s * 0.16, s * 0.18, s * 0.08);
+    ctx.restore();
+  }
+}
+\nfunction drawCar() {
   const cx = width / 2 + car.lateral * width * 0.18;
   const cy = height * 0.79;
   const lean = car.heading * 0.12;
@@ -375,6 +459,8 @@ function frame(now) {
   drawDistantForest();
   drawRoad();
   drawForest();
+  drawRoadsideObjects();
+  drawTraffic();
   drawMotion();
   drawCar();
 
