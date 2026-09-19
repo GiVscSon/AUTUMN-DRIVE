@@ -102,8 +102,6 @@ function roadSample(distance) {
 }
 
 function routeForTraffic(other, dt) {
-  // NPC route state: straight through the junction by default,
-  // with a small subset choosing a turn when they enter the junction.
   if (!other.routeState) {
     other.routeState = "straight";
     other.routeTargetLane = other.routeLane;
@@ -126,7 +124,6 @@ function routeForTraffic(other, dt) {
 }
 
 function update(dt) {
-
   const throttle = pressed("w", "arrowup") ? 1 : 0;
   const brake = pressed("s", "arrowdown") ? 1 : 0;
   const steer = (pressed("d", "arrowright") ? 1 : 0) - (pressed("a", "arrowleft") ? 1 : 0);
@@ -163,7 +160,6 @@ function update(dt) {
     routeForTraffic(other, dt);
   }
 
-  // Simple forward collision envelope.
   for (const other of world.traffic) {
     if (Math.abs(other.z - 0.82) < 0.075 && Math.abs(other.lane - car.lateral * 0.62) < 0.22) {
       car.speed = Math.min(car.speed, Math.max(12, other.speed * 0.82));
@@ -190,7 +186,6 @@ function drawSky() {
   ctx.fillStyle = g;
   ctx.fillRect(0, 0, width, height);
 
-  // Low cloud bands keep the image close to the overcast reference.
   ctx.globalAlpha = 0.12;
   ctx.fillStyle = "#eef0ea";
   for (let i = 0; i < 7; i++) {
@@ -234,7 +229,6 @@ function drawRoad() {
   ctx.fillStyle = "#313438";
   ctx.fillRect(0, horizon, width, height - horizon);
 
-  // Road polygon.
   ctx.beginPath();
   ctx.moveTo(farL.x, farL.y);
   ctx.lineTo(farR.x, farR.y);
@@ -244,7 +238,6 @@ function drawRoad() {
   ctx.fillStyle = "#1d2122";
   ctx.fill();
 
-  // Wet asphalt sheen.
   const wet = ctx.createLinearGradient(0, horizon, 0, height);
   wet.addColorStop(0, "rgba(210,205,184,.02)");
   wet.addColorStop(0.55, "rgba(191,150,92,.08)");
@@ -252,7 +245,6 @@ function drawRoad() {
   ctx.fillStyle = wet;
   ctx.fill();
 
-  // Road edge lines.
   for (const side of [-1, 1]) {
     ctx.beginPath();
     for (let i = 0; i <= 40; i++) {
@@ -266,7 +258,6 @@ function drawRoad() {
     ctx.stroke();
   }
 
-  // Broken centre marking plus subtle lane guides.
   for (let i = 2; i < 25; i++) {
     const d = i / 25;
     const p = project(d, 0);
@@ -280,7 +271,6 @@ function drawRoad() {
     ctx.stroke();
   }
 
-  // At the intersection the road opens slightly, creating a readable junction cue.
   const junction = roadSample(world.distance);
   if (junction.intersection) {
     const p = project(0.48, 0);
@@ -294,7 +284,6 @@ function drawRoad() {
     ctx.stroke();
   }
 
-  // Reflected sky/trees streaks on wet road.
   ctx.globalAlpha = 0.18;
   for (let i = 0; i < 16; i++) {
     const d = 0.08 + i / 20;
@@ -329,15 +318,12 @@ function drawTree(side, depth, seed) {
 }
 
 function drawForest() {
-  // Back to front gives a cheap but convincing pseudo-3D corridor.
   for (let i = 28; i >= 1; i--) {
     const depth = i / 29;
     drawTree(-1, depth, i * 3 + 1);
     drawTree(1, depth, i * 5 + 2);
   }
 }
-
-
 
 function drawRoadsideObjects() {
   for (const obj of world.roadside) {
@@ -407,7 +393,6 @@ function drawCar() {
   ctx.translate(cx, cy);
   ctx.rotate(lean);
 
-  // Reflection and shadow.
   ctx.fillStyle = "rgba(211,151,75,.17)";
   ctx.beginPath();
   ctx.ellipse(0, 58, 116, 20, 0, 0, Math.PI * 2);
@@ -418,7 +403,6 @@ function drawCar() {
   ctx.ellipse(0, 28, 74, 23, 0, 0, Math.PI * 2);
   ctx.fill();
 
-  // Car body.
   ctx.fillStyle = "#3d4547";
   ctx.beginPath();
   ctx.roundRect(-52, -24, 104, 58, 12);
@@ -429,7 +413,6 @@ function drawCar() {
   ctx.roundRect(-34, -48, 68, 35, 12);
   ctx.fill();
 
-  // Windows.
   ctx.fillStyle = "rgba(177,194,192,.55)";
   ctx.beginPath();
   ctx.moveTo(-27, -42);
@@ -446,36 +429,30 @@ function drawCar() {
   ctx.closePath();
   ctx.fill();
 
-  // Penguin driver, seated inside the cabin.
   const bob = Math.sin(world.distance * 5.5) * Math.min(1.5, car.speed / 100);
   ctx.save();
   ctx.translate(0, -23 + bob);
 
-  // Body.
   ctx.fillStyle = "#171b1d";
   ctx.beginPath();
   ctx.ellipse(0, 8, 13, 18, 0, 0, Math.PI * 2);
   ctx.fill();
 
-  // White belly.
   ctx.fillStyle = "#e5e2d8";
   ctx.beginPath();
   ctx.ellipse(0, 10, 8, 12, 0, 0, Math.PI * 2);
   ctx.fill();
 
-  // Head.
   ctx.fillStyle = "#171b1d";
   ctx.beginPath();
   ctx.arc(0, -10, 11, 0, Math.PI * 2);
   ctx.fill();
 
-  // Face.
   ctx.fillStyle = "#eee9dc";
   ctx.beginPath();
   ctx.ellipse(0, -8, 7, 6, 0, 0, Math.PI * 2);
   ctx.fill();
 
-  // Beak.
   ctx.fillStyle = "#d98b35";
   ctx.beginPath();
   ctx.moveTo(0, -5);
@@ -484,14 +461,12 @@ function drawCar() {
   ctx.closePath();
   ctx.fill();
 
-  // Eyes.
   ctx.fillStyle = "#111";
   ctx.beginPath();
   ctx.arc(-3.3, -10, 1.2, 0, Math.PI * 2);
   ctx.arc(3.3, -10, 1.2, 0, Math.PI * 2);
   ctx.fill();
 
-  // Flippers on steering wheel.
   ctx.strokeStyle = "#171b1d";
   ctx.lineWidth = 5;
   ctx.lineCap = "round";
@@ -502,7 +477,6 @@ function drawCar() {
   ctx.lineTo(18, 0 + car.heading * 4);
   ctx.stroke();
 
-  // Steering wheel.
   ctx.strokeStyle = "#b8b2a4";
   ctx.lineWidth = 2;
   ctx.beginPath();
@@ -510,7 +484,6 @@ function drawCar() {
   ctx.stroke();
   ctx.restore();
 
-  // Lights.
   ctx.fillStyle = "#d6a34d";
   ctx.fillRect(-46, 20, 15, 5);
   ctx.fillRect(31, 20, 15, 5);
