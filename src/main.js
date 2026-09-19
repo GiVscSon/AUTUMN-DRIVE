@@ -22,16 +22,16 @@ const world = {
     segmentLength: 1,
     laneWidth: 1,
     segments: [
-      { length: 2.4, curve: 0.00, width: 1.00 },
-      { length: 1.8, curve: 0.16, width: 1.00 },
-      { length: 2.1, curve: 0.28, width: 1.00 },
-      { length: 1.6, curve: -0.12, width: 1.00 },
-      { length: 2.0, curve: -0.30, width: 1.00 },
-      { length: 2.4, curve: 0.00, width: 1.00 },
-      { length: 1.5, curve: 0.00, width: 1.15, intersection: true },
-      { length: 1.7, curve: 0.00, width: 1.00 },
-      { length: 2.0, curve: -0.22, width: 1.00 },
-      { length: 2.2, curve: 0.20, width: 1.00 },
+      { length: 2.4, curve: 0.0, width: 1.0 },
+      { length: 1.8, curve: 0.16, width: 1.0 },
+      { length: 2.1, curve: 0.28, width: 1.0 },
+      { length: 1.6, curve: -0.12, width: 1.0 },
+      { length: 2.0, curve: -0.3, width: 1.0 },
+      { length: 2.4, curve: 0.0, width: 1.0 },
+      { length: 1.5, curve: 0.0, width: 1.15, intersection: true },
+      { length: 1.7, curve: 0.0, width: 1.0 },
+      { length: 2.0, curve: -0.22, width: 1.0 },
+      { length: 2.2, curve: 0.2, width: 1.0 },
     ],
   },
   roadCenter: 0,
@@ -138,14 +138,19 @@ function update(dt) {
   car.targetHeading = Math.max(-0.8, Math.min(0.8, car.targetHeading));
   car.heading += (car.targetHeading - car.heading) * Math.min(1, dt * 5.5);
 
-  const lateralVelocity = steer * (0.22 + car.speed / 210);
-  car.lateral += lateralVelocity * dt;
-  car.lateral *= Math.pow(0.985, dt * 60);
-  car.lateral = Math.max(-0.86, Math.min(0.86, car.lateral));
-
+  // advance along road and update curvature
   world.distance += car.speed * dt * 0.026;
   const sample = roadSample(world.distance);
   world.curve += (sample.curve - world.curve) * Math.min(1, dt * 3.5);
+
+  // lateral position is now a consequence of heading and road curvature,
+  // not the steering input directly
+  const lateralFromHeading = car.heading * car.speed * 0.0014;
+  const centrifugal = world.curve * car.speed * 0.0008;
+  car.lateral += (lateralFromHeading + centrifugal) * dt;
+  const friction = 0.4 + car.speed * 0.0012;
+  car.lateral -= car.lateral * friction * dt;
+  car.lateral = Math.max(-0.86, Math.min(0.86, car.lateral));
 
   for (const other of world.traffic) {
     other.z += (car.speed - other.speed) * dt * 0.00075;
@@ -168,7 +173,7 @@ function update(dt) {
 }
 
 function project(depth, lane = 0) {
-  const horizon = height * 0.40;
+  const horizon = height * 0.4;
   const p = Math.pow(depth, 1.65);
   const y = horizon + p * (height - horizon);
   const roadHalf = width * (0.045 + p * 0.49);
@@ -205,7 +210,7 @@ function drawSky() {
 }
 
 function drawDistantForest() {
-  const horizon = height * 0.40;
+  const horizon = height * 0.4;
   ctx.fillStyle = "#303c36";
   ctx.fillRect(0, horizon - 28, width, 42);
 
@@ -224,7 +229,7 @@ function drawRoad() {
   const nearR = project(1, 1);
   const farL = project(0, -1);
   const farR = project(0, 1);
-  const horizon = height * 0.40;
+  const horizon = height * 0.4;
 
   ctx.fillStyle = "#313438";
   ctx.fillRect(0, horizon, width, height - horizon);
@@ -287,7 +292,7 @@ function drawRoad() {
   ctx.globalAlpha = 0.18;
   for (let i = 0; i < 16; i++) {
     const d = 0.08 + i / 20;
-    const p = project(Math.min(1, d), (i % 2 ? -0.48 : 0.48));
+    const p = project(Math.min(1, d), i % 2 ? -0.48 : 0.48);
     ctx.strokeStyle = i % 3 === 0 ? "#b76d3e" : "#c7a65e";
     ctx.lineWidth = 1 + d * 6;
     ctx.beginPath();
@@ -379,7 +384,7 @@ function drawTraffic() {
 
     ctx.fillStyle = "#d9a14c";
     ctx.fillRect(-s * 0.48, s * 0.16, s * 0.18, s * 0.08);
-    ctx.fillRect(s * 0.30, s * 0.16, s * 0.18, s * 0.08);
+    ctx.fillRect(s * 0.3, s * 0.16, s * 0.18, s * 0.08);
     ctx.restore();
   }
 }
