@@ -19,6 +19,16 @@ const car = {
   slip: 0,
 };
 
+const camera = {
+  x: 0,
+  y: 0,
+  roll: 0,
+  lookAhead: 0,
+  speedZoom: 0,
+  shakeX: 0,
+  shakeY: 0,
+};
+
 const world = {
   distance: 0,
   road: {
@@ -230,21 +240,41 @@ function update(dt) {
       car.lateralVelocity *= 0.72;
     }
   }
+
+  // Chase-camera response. The horizon follows actual motion, not raw steering input.
+  const speedNorm = Math.min(1, car.speed / 150);
+  const targetCamX = -car.lateral * width * 0.055 - car.heading * width * 0.028;
+  const targetRoll = -car.heading * 0.025 - car.slip * 0.018;
+  const targetLookAhead = car.heading * width * (0.035 + speedNorm * 0.03);
+  const targetZoom = speedNorm * 0.055;
+
+  camera.x += (targetCamX - camera.x) * Math.min(1, dt * 4.2);
+  camera.roll += (targetRoll - camera.roll) * Math.min(1, dt * 4.8);
+  camera.lookAhead += (targetLookAhead - camera.lookAhead) * Math.min(1, dt * 3.2);
+  camera.speedZoom += (targetZoom - camera.speedZoom) * Math.min(1, dt * 2.6);
+
+  const roughness = speedNorm * speedNorm;
+  const phase = world.distance * 18;
+  camera.shakeX = Math.sin(phase * 0.73) * 1.2 * roughness;
+  camera.shakeY = Math.sin(phase) * 0.85 * roughness;
 }
 
 function project(depth, lane = 0) {
-  const horizon = height * 0.4;
-  const p = Math.pow(depth, 1.65);
-  const y = horizon + p * (height - horizon);
-  const roadHalf = width * (0.045 + p * 0.49);
-  const bend = world.curve * p * p * width * 0.36;
-  const center = width / 2 + bend;
+  const speedNorm = Math.min(1, car.speed / 150);
+  const horizon = height * (0.405 - camera.speedZoom * 0.26);
+  const p = Math.pow(depth, 1.72 - speedNorm * 0.08);
+  const y = horizon + p * (height - horizon) + camera.shakeY * p;
+  const roadHalf = width * (0.042 + p * (0.47 + camera.speedZoom * 0.42));
+  const bend = world.curve * p * p * width * 0.39;
+  const perspectiveFollow = camera.lookAhead * (0.25 + p * 0.75);
+  const center = width / 2 + bend + camera.x + perspectiveFollow + camera.shakeX * p;
   const laneOffset = lane * roadHalf * world.road.laneWidth;
-  return { x: center + laneOffset, y, roadHalf, center, p };
+  return { x: center + laneOffset, y, roadHalf, center, p, horizon };
 }
 
 function drawSky() {
-  const g = ctx.createLinearGradient(0, 0, 0, height * 0.55);
+  const horizon = project(0, 0).horizon;
+  const g = ctx.createLinearGradient(0, 0, 0, horizon + height * 0.15);
   g.addColorStop(0, "#62686b");
   g.addColorStop(0.55, "#858b8b");
   g.addColorStop(1, "#b8b09d");
@@ -270,7 +300,7 @@ function drawSky() {
 }
 
 function drawDistantForest() {
-  const horizon = height * 0.4;
+  const horizon = project(0, 0).horizon;
   ctx.fillStyle = "#303c36";
   ctx.fillRect(0, horizon - 28, width, 42);
 
@@ -289,7 +319,7 @@ function drawRoad() {
   const nearR = project(1, 1);
   const farL = project(0, -1);
   const farR = project(0, 1);
-  const horizon = height * 0.4;
+  const horizon = farL.horizon;
 
   ctx.fillStyle = "#313438";
   ctx.fillRect(0, horizon, width, height - horizon);
@@ -323,13 +353,17 @@ function drawRoad() {
     ctx.stroke();
   }
 
-  for (let i = 2; i < 25; i++) {
-    const d = i / 25;
+  // Dashed centre line flows toward the camera with world distance.
+  const stripePhase = (world.distance * 0.34) % 1;
+  for (let i = 0; i < 22; i++) {
+    const raw = (i + stripePhase) / 22;
+    const d = raw % 1;
+    if (d < 0.045) continue;
     const p = project(d, 0);
-    const d2 = Math.min(1, d + 0.035 + d * 0.045);
+    const d2 = Math.min(1, d + 0.026 + d * 0.032);
     const p2 = project(d2, 0);
-    ctx.strokeStyle = "rgba(232,216,174,.92)";
-    ctx.lineWidth = 1.5 + d * 6;
+    ctx.strokeStyle = "rgba(236,220,177,.94)";
+    ctx.lineWidth = 1.1 + d * 5.8;
     ctx.beginPath();
     ctx.moveTo(p.x, p.y);
     ctx.lineTo(p2.x, p2.y);
@@ -450,9 +484,10 @@ function drawTraffic() {
 }
 
 function drawCar() {
-  const cx = width / 2 + car.lateral * width * 0.18;
-  const cy = height * 0.79;
-  const lean = car.heading * 0.09 + car.slip * 0.045;
+  const speedNorm = Math.min(1, car.speed / 150);
+  const cx = width / 2 + car.lateral * width * 0.18 + camera.shakeX * 0.35;
+  const cy = height * (0.79 + speedNorm * 0.012) + camera.shakeY * 0.28;
+  const lean = car.heading * 0.09 + car.slip * 0.045 - camera.roll * 0.45;
 
   ctx.save();
   ctx.translate(cx, cy);
@@ -593,22 +628,42 @@ function attachMobileControls() {
 attachMobileControls();
 
 function drawMotion() {
-  const amount = Math.min(0.12, car.speed / 1100);
-  if (amount < 0.01) return;
+  const speedNorm = Math.min(1, car.speed / 150);
+  if (speedNorm < 0.18) return;
 
+  const amount = 0.025 + speedNorm * 0.11;
   ctx.globalAlpha = amount;
-  for (let i = 0; i < 14; i++) {
-    const y = height * (0.48 + Math.random() * 0.48);
-    const len = 25 + car.speed * (0.25 + Math.random() * 0.45);
-    const x = Math.random() * width;
-    ctx.strokeStyle = i % 3 === 0 ? "#d4b16e" : "#9b9c91";
-    ctx.lineWidth = 1 + Math.random() * 1.5;
+  const count = 8 + Math.floor(speedNorm * 18);
+  for (let i = 0; i < count; i++) {
+    const seed = (i * 37 + Math.floor(world.distance * 7)) % 101;
+    const y = height * (0.47 + ((seed * 13) % 50) / 100);
+    const x = ((seed * 73) % 100) / 100 * width;
+    const len = 18 + car.speed * (0.22 + ((seed % 7) / 18));
+    ctx.strokeStyle = i % 4 === 0 ? "#d4b16e" : "#9b9c91";
+    ctx.lineWidth = 0.8 + speedNorm * 1.3;
     ctx.beginPath();
     ctx.moveTo(x, y);
-    ctx.lineTo(x + (Math.random() - 0.5) * 12, y + len * 0.08);
+    ctx.lineTo(x - camera.lookAhead * 0.018, y + len * 0.09);
     ctx.stroke();
   }
   ctx.globalAlpha = 1;
+}
+
+function drawVignette() {
+  const speedNorm = Math.min(1, car.speed / 150);
+  const g = ctx.createRadialGradient(
+    width / 2,
+    height * 0.58,
+    Math.min(width, height) * 0.18,
+    width / 2,
+    height * 0.58,
+    Math.max(width, height) * 0.72
+  );
+  g.addColorStop(0, "rgba(0,0,0,0)");
+  g.addColorStop(0.7, `rgba(0,0,0,${0.05 + speedNorm * 0.02})`);
+  g.addColorStop(1, `rgba(0,0,0,${0.22 + speedNorm * 0.08})`);
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, width, height);
 }
 
 let previous = performance.now();
@@ -617,6 +672,12 @@ function frame(now) {
   previous = now;
 
   update(dt);
+
+  ctx.save();
+  ctx.translate(width / 2, height / 2);
+  ctx.rotate(camera.roll);
+  ctx.translate(-width / 2, -height / 2);
+
   drawSky();
   drawDistantForest();
   drawRoad();
@@ -625,6 +686,9 @@ function frame(now) {
   drawTraffic();
   drawMotion();
   drawCar();
+  ctx.restore();
+
+  drawVignette();
 
   speedReadout.textContent = Math.round(car.speed) + " km/h";
   requestAnimationFrame(frame);
